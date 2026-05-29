@@ -14,8 +14,9 @@ class Bot:
 
         self.user_id = None
         self.weather_flag = False
+        self.exchange_flag = False
 
-        self.geolocator = Nominatim(user_agent='my_weather_bot') # user_agent — имя проги
+        self.geolocator = Nominatim(user_agent='my_weather_bot', timeout=10) # user_agent — имя проги
 
         self.message = {
             'старт': ('Привет!'
@@ -25,12 +26,14 @@ class Bot:
                       '\n🏙️ /weather [город] - получить погоду'
                       '\n💻 /about - информация о проекте'
                       '\n💡 /fact - интересный факт'
+                      '\n💵 /exchange [валюта] - получить курс валюты'
                       '\n\nПРИМЕЧАНИЕ: скобки писать не нужно!'),
             'помощь': ('Список доступных команд:'
                        '\n\n💪 /help - помощь'
                        '\n🏙️ /weather [город] - получить погоду'
                        '\n💻 /about - информация о проекте'
                        '\n💡 /fact - интересный факт'
+                       '\n💵 /exchange [валюта] - получить курс валюты'
                        '\n\nПРИМЕЧАНИЕ: скобки писать не нужно!'),
             'привет': 'И тебе привет! 🤝',
             'пока': 'До встречи! 👋',
@@ -42,15 +45,27 @@ class Bot:
                             '\n\nВозможности бота:'
                             '\n\n1. Он умеет определять погоду по названию города.'
                             '\n2. Он умеет выдавать случайный факт :)'
+                            '\n3. Он умеет следить за курсом валют'                          
                             '\nНа данном этапе это все...'
                             '\n\nПриятного пользования ботом 😉'),
+
+            # Погода
             'город_не_указан': 'Укажи город, например: /weather Москва',
             'город_не_найден': lambda s: f"Не удалось найти город '{s}'. "
                                          f"Проверь название или попробуй на английском (Moscow).",
             'погода': 'Укажите город! 😉',
-            'статистика_заголовок': '📝 Статистика использования бота в городах:\n\n',
-            'статистика_город': lambda s, n: f'В городе {s.title()} бот определял погоду {self._n(n)}\n'
 
+            # Статистика
+            'статистика_заголовок': '📝 Статистика использования бота в городах:\n\n',
+            'статистика_город': lambda s, n: f'В городе {s.title()} бот определял погоду {self._n(n)}\n',
+
+            # Валюты
+            'введите_валюту': 'Пожалуйста, введите валюту!\n'
+                              'Примеры правильного ввода: rub, USD (регистр не важен).',
+            'валюта_не_указана': 'Валюта по умолчанию не указана!\n'
+                                 'Будут приведены данные о USD (доллары США).',
+            'валюта': lambda val: f'Данные о валюте {val['Name']} ({val['CharCode']}):\n'
+                                  f'Цена: {round(val['Value'], 2)} руб.'
         }
         self.emoji = {
             0: '☀️',
@@ -75,6 +90,8 @@ class Bot:
             96: '⚡❄️',
             99: '⚡❄️'
         }
+
+        self.fun = Entertainment()
 
     def _send(self, text):
         self.vk.messages.send(
@@ -112,6 +129,7 @@ class Bot:
         keyboard.add_button('Статистика', color=VkKeyboardColor.NEGATIVE)
         keyboard.add_line()
         keyboard.add_button('Факт', color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button('Курс валюты', color=VkKeyboardColor.NEGATIVE)
 
         # Отправляем сообщение с клавиатурой
         self.vk.messages.send(
@@ -188,19 +206,6 @@ class Bot:
         self._send(message)
         # print(city_statistic)
 
-    @staticmethod
-    def get_random_fact():
-        try:
-            url = f"https://meowfacts.herokuapp.com/?lang=rus"
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                fact = response.json()['data'][0]
-                return fact
-            else:
-                return "Не удалось получить факт, попробуй позже."
-        except Exception as e:
-            return f"Ошибка: {e}"
-
     def start(self):
         print('Бот запущен. Ожидаю сообщения...')
         for event in self.longpoll.listen():
@@ -221,13 +226,12 @@ class Bot:
                         self._send(self.message['разработчик'])
                     case '/statistic':
                         self.get_statistic()
-                    case '/fact':
-                        self._send(self.get_random_fact())
                     case 'привет':
                         self._send(self.message['привет'])
                         self.send_keyboard()
                     case 'пока':
                         self._send(self.message['пока'])
+
                     # События с клавиатуры
                     case 'помощь':
                         self._send(self.message['помощь'])
@@ -235,8 +239,6 @@ class Bot:
                         self._send(self.message['разработчик'])
                     case 'статистика':
                         self.get_statistic()
-                    case 'факт':
-                        self._send(self.get_random_fact())
 
                 # Погода
                 if msg.startswith('/weather'):
@@ -249,12 +251,77 @@ class Bot:
                 elif msg == 'погода':
                     self.weather_flag = True
                     self._send(self.message['погода'])
-
                 elif self.weather_flag:
                     city = msg.strip()
                     self.get_weather(city)
                     self.weather_flag = False
 
+                # Дополнительные команды
+                if msg.startswith('/exchange'):
+                    try:
+                        valute = msg.strip().split(maxsplit=1)[1]
+                    except IndexError:
+                        self._send(self.message['валюта_не_указана'])
+                        valute = 'usd' # Значение по умолчанию
+                    valute_json = self.fun.get_currency_rates(valute)
+                    if type(valute_json) != dict:
+                        self._send(valute_json)
+                        continue
+                    self._send(self.message['валюта'](valute_json))
+                elif msg == 'курс валюты':
+                    self.exchange_flag = True
+                    self._send(self.message['введите_валюту'])
+                elif self.exchange_flag:
+                    self.exchange_flag = False
+                    valute = msg.strip()
+                    valute_json = self.fun.get_currency_rates(valute)
+                    if type(valute_json) != dict:
+                        self._send(valute_json)
+                        continue
+                    self._send(self.message['валюта'](valute_json))
+
+                match msg:
+                    case '/fact':
+                        self._send(self.fun.get_random_fact())
+                    case 'факт':
+                        self._send(self.fun.get_random_fact())
+
+
+
+class Entertainment:
+    @staticmethod
+    def get_random_fact():
+        try:
+            url = f"https://meowfacts.herokuapp.com/?lang=rus"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                fact = response.json()['data'][0]
+                return fact
+            else:
+                return "Не удалось получить факт, попробуй позже."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    @staticmethod
+    def get_currency_rates(valute):
+        try:
+            url = f"https://www.cbr-xml-daily.ru/daily_json.js"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                valute = valute.upper()
+                if valute == 'RUB':
+                    return {'CharCode': 'RUB',
+                            'Name': 'Российский рубль',
+                            'Value': 1}
+                data = response.json()['Valute'][valute]
+                # print(data)
+                return data
+            else:
+                return "Не удалось получить данные о валютах, попробуйте позже."
+        except Exception as e:
+            print(e)
+            return (f"Валюта не найдена! Попробуйте ввести еще раз!\n"
+                    f"Регистр не важен, примеры: usd, AUD.")
 # Токен
 with open('token.txt', 'r') as f:
     TOKEN = f.read().strip()
